@@ -1,18 +1,15 @@
 -- DUI (Direct User Interface) Manager for FiveM
--- Basic table-based implementation with full mouse support
+-- Table-based implementation with mouse support, botones, hover, cámara y reemplazo de textura
 
 ---@class DUI
 DUI = {}
 
--- Constants
 local DEFAULT_WIDTH <const> = 1280
 local DEFAULT_HEIGHT <const> = 720
 
--- Store active DUI instances
 local activeInstances = {}
 local instanceCounter = 0
 
--- Mouse tracking state
 local mouseState = {
     tracking = false,
     activeId = nil,
@@ -22,7 +19,6 @@ local mouseState = {
     currentButton = nil
 }
 
--- Mouse button constants
 local MOUSE_BUTTONS <const> = {
     LEFT = "left",
     MIDDLE = "middle",
@@ -30,22 +26,19 @@ local MOUSE_BUTTONS <const> = {
 }
 
 ---@class DUIInstance
----@field id number Unique identifier for this DUI instance
----@field url string URL loaded in the DUI
----@field width number Width of the DUI
----@field height number Height of the DUI
----@field handle number DUI browser handle
----@field txd string Texture dictionary name
----@field txn string Texture name
----@field active boolean Whether the DUI is active
----@field trackMouse boolean Whether mouse tracking is enabled for this instance
----@field mouseScale table<string, number> Scale factors for mouse coordinates
+---@field id number
+---@field url string
+---@field width number
+---@field height number
+---@field handle number
+---@field txd string
+---@field txn string
+---@field active boolean
+---@field trackMouse boolean
+---@field mouseScale table<string, number>
+---@field buttons table<string, table>
+---@field hoveredButton string|nil
 
--- Create a new DUI instance
----@param url string URL to load
----@param width? number Width of the DUI (default: 1280)
----@param height? number Height of the DUI (default: 720)
----@return number|nil id The DUI instance ID if successful, nil if failed
 function DUI.Create(url, width, height)
     if not url or type(url) ~= "string" then
         return print("DUI.Create: URL is required and must be a string")
@@ -75,7 +68,9 @@ function DUI.Create(url, width, height)
         mouseScale = {
             x = 1.0,
             y = 1.0
-        }
+        },
+        buttons = {},
+        hoveredButton = nil
     }
 
     -- Create runtime texture
@@ -86,9 +81,6 @@ function DUI.Create(url, width, height)
     return id
 end
 
--- Destroy a DUI instance
----@param id number DUI instance ID
----@return boolean success Whether the operation was successful
 function DUI.Destroy(id)
     local instance = activeInstances[id]
     if not instance then return false end
@@ -101,10 +93,6 @@ function DUI.Destroy(id)
     return true
 end
 
--- Set URL for a DUI instance
----@param id number DUI instance ID
----@param url string New URL to load
----@return boolean success Whether the operation was successful
 function DUI.SetURL(id, url)
     local instance = activeInstances[id]
     if not instance then return false end
@@ -114,10 +102,6 @@ function DUI.SetURL(id, url)
     return true
 end
 
--- Send a message to the DUI
----@param id number DUI instance ID
----@param message table Message to send (will be JSON encoded)
----@return boolean success Whether the operation was successful
 function DUI.SendMessage(id, message)
     local instance = activeInstances[id]
     if not instance then return false end
@@ -126,13 +110,34 @@ function DUI.SendMessage(id, message)
     return true
 end
 
--- Mouse interaction functions
-
--- Move mouse cursor on DUI
+-- NUEVO: Reemplazar la textura de un DUI existente
 ---@param id number DUI instance ID
----@param x number X coordinate
----@param y number Y coordinate
----@return boolean success Whether the operation was successful
+---@param url string Nueva URL de la textura
+---@return boolean success
+function DUI.ReplaceTexture(id, url)
+    local instance = activeInstances[id]
+    if not instance then return false end
+
+    -- Destruir el DUI anterior
+    if instance.handle then
+        DestroyDui(instance.handle)
+    end
+
+    -- Crear uno nuevo con la nueva textura
+    local handle = CreateDui(url, instance.width, instance.height)
+    if not handle then
+        print("DUI.ReplaceTexture: Failed to create new DUI for id", id)
+        return false
+    end
+
+    instance.handle = handle
+    instance.url = url
+
+    local duiHandle = GetDuiHandle(handle)
+    CreateRuntimeTextureFromDuiHandle(CreateRuntimeTxd(instance.txd), instance.txn, duiHandle)
+    return true
+end
+
 function DUI.MoveMouse(id, x, y)
     local instance = activeInstances[id]
     if not instance then return false end
@@ -141,10 +146,6 @@ function DUI.MoveMouse(id, x, y)
     return true
 end
 
--- Simulate mouse button press
----@param id number DUI instance ID
----@param button "left"|"middle"|"right" Mouse button to simulate
----@return boolean success Whether the operation was successful
 function DUI.MouseDown(id, button)
     local instance = activeInstances[id]
     if not instance then return false end
@@ -153,7 +154,6 @@ function DUI.MouseDown(id, button)
         return print("DUI.MouseDown: Invalid button. Must be 'left', 'middle', or 'right'")
     end
 
-    -- Update mouse state
     if instance.trackMouse then
         mouseState.isPressed = true
         mouseState.currentButton = button
@@ -163,10 +163,6 @@ function DUI.MouseDown(id, button)
     return true
 end
 
--- Simulate mouse button release
----@param id number DUI instance ID
----@param button "left"|"middle"|"right" Mouse button to simulate
----@return boolean success Whether the operation was successful
 function DUI.MouseUp(id, button)
     local instance = activeInstances[id]
     if not instance then return false end
@@ -175,7 +171,6 @@ function DUI.MouseUp(id, button)
         return print("DUI.MouseUp: Invalid button. Must be 'left', 'middle', or 'right'")
     end
 
-    -- Update mouse state
     if instance.trackMouse then
         mouseState.isPressed = false
         mouseState.currentButton = nil
@@ -185,11 +180,6 @@ function DUI.MouseUp(id, button)
     return true
 end
 
--- Simulate mouse wheel movement
----@param id number DUI instance ID
----@param deltaY number Vertical scroll amount
----@param deltaX number Horizontal scroll amount
----@return boolean success Whether the operation was successful
 function DUI.MouseWheel(id, deltaY, deltaX)
     local instance = activeInstances[id]
     if not instance then return false end
@@ -198,30 +188,28 @@ function DUI.MouseWheel(id, deltaY, deltaX)
     return true
 end
 
--- Click helper function (combines MoveMouse, MouseDown, and MouseUp)
----@param id number DUI instance ID
----@param x number X coordinate
----@param y number Y coordinate
----@param button? "left"|"middle"|"right" Mouse button to click (default: "left")
----@return boolean success Whether the operation was successful
 function DUI.Click(id, x, y, button)
     button = button or "left"
+    local instance = activeInstances[id]
+    if not instance then return false end
+
+    -- Detectar si el click está sobre algún botón
+    if instance.buttons then
+        for name, btn in pairs(instance.buttons) do
+            if x >= btn.x and x <= btn.x + btn.w and y >= btn.y and y <= btn.y + btn.h then
+                if btn.onClick then
+                    btn.onClick(name, x, y, button)
+                end
+            end
+        end
+    end
 
     if not DUI.MoveMouse(id, x, y) then return false end
     if not DUI.MouseDown(id, button) then return false end
-
-    -- Small delay to simulate real click
     Citizen.Wait(50)
-
     return DUI.MouseUp(id, button)
 end
 
--- Enable or disable mouse tracking for a DUI instance
----@param id number DUI instance ID
----@param enabled boolean Whether to enable mouse tracking
----@param scaleX? number Scale factor for X coordinates (default: 1.0)
----@param scaleY? number Scale factor for Y coordinates (default: 1.0)
----@return boolean success Whether the operation was successful
 function DUI.TrackMouse(id, enabled, scaleX, scaleY)
     local instance = activeInstances[id]
     if not instance then return false end
@@ -241,21 +229,53 @@ function DUI.TrackMouse(id, enabled, scaleX, scaleY)
     return true
 end
 
--- Update mouse coordinates from screen position
----@param screenX number Screen X coordinate
----@param screenY number Screen Y coordinate
----@return boolean updated Whether coordinates were updated
+-- Añade un botón clickeable y con hover a una instancia DUI
+function DUI.AddButton(id, name, x, y, w, h, onClick, onHover)
+    local instance = activeInstances[id]
+    if not instance then return false end
+    instance.buttons = instance.buttons or {}
+    instance.hoveredButton = instance.hoveredButton or nil
+    instance.buttons[name] = {
+        x = x,
+        y = y,
+        w = w,
+        h = h,
+        onClick = onClick,
+        onHover = onHover,
+        hovered = false
+    }
+    return true
+end
+
 local function UpdateMousePosition(screenX, screenY)
     if not mouseState.tracking or not mouseState.activeId then return false end
 
     local instance = activeInstances[mouseState.activeId]
     if not instance or not instance.trackMouse then return false end
 
-    -- Scale coordinates based on DUI dimensions and scale factors
     local scaledX = screenX * instance.mouseScale.x
     local scaledY = screenY * instance.mouseScale.y
 
-    -- Only update if position changed
+    -- Detección de hover sobre botones
+    if instance.buttons then
+        local hovered = nil
+        for btnName, btn in pairs(instance.buttons) do
+            if scaledX >= btn.x and scaledX <= btn.x + btn.w and scaledY >= btn.y and scaledY <= btn.y + btn.h then
+                hovered = btnName
+                if not btn.hovered then
+                    btn.hovered = true
+                    if btn.onHover then btn.onHover(true) end
+                end
+            else
+                if btn.hovered then
+                    btn.hovered = false
+                    if btn.onHover then btn.onHover(false) end
+                end
+            end
+        end
+        instance.hoveredButton = hovered
+    end
+
     if scaledX ~= mouseState.lastX or scaledY ~= mouseState.lastY then
         mouseState.lastX = scaledX
         mouseState.lastY = scaledY
@@ -266,19 +286,14 @@ local function UpdateMousePosition(screenX, screenY)
     return false
 end
 
--- Mouse tracking thread
 Citizen.CreateThread(function()
     while true do
         if mouseState.tracking and mouseState.activeId then
             local instance = activeInstances[mouseState.activeId]
             if instance and instance.trackMouse then
-                -- Get current cursor position
                 local screenX, screenY = GetNuiCursorPosition()
                 UpdateMousePosition(screenX, screenY)
-
-                -- Handle held mouse buttons
                 if mouseState.isPressed and mouseState.currentButton then
-                    -- Keep the button pressed state
                     SendDuiMouseDown(instance.handle, mouseState.currentButton)
                 end
             end
@@ -287,43 +302,58 @@ Citizen.CreateThread(function()
     end
 end)
 
--- Utility functions
-
--- Get textures for a DUI instance
----@param id number DUI instance ID
----@return string|nil txd, string|nil txn Texture dictionary and name, or nil if instance not found
 function DUI.GetTextures(id)
     local instance = activeInstances[id]
     if not instance then return nil, nil end
-
     return instance.txd, instance.txn
 end
 
--- Check if a DUI instance exists
----@param id number DUI instance ID
----@return boolean exists Whether the instance exists and is active
 function DUI.Exists(id)
     local instance = activeInstances[id]
     return instance ~= nil and instance.active
 end
 
--- Get all active DUI instances
----@return table<number, DUIInstance> instances Table of active DUI instances
 function DUI.GetActiveInstances()
     return activeInstances
 end
 
--- Cleanup all DUI instances
 function DUI.CleanupAll()
     for id in pairs(activeInstances) do
         DUI.Destroy(id)
     end
 end
 
--- Automatic cleanup on resource stop
 AddEventHandler('onResourceStop', function(resourceName)
     if GetCurrentResourceName() ~= resourceName then return end
     DUI.CleanupAll()
 end)
+
+-- Cámara: acercar y restaurar
+function DUI.FocusCamera(pos, distancia, fov)
+    local playerPed = PlayerPedId()
+    local rot = GetEntityRotation(playerPed)
+    local forward = vector3(
+        math.sin(math.rad(rot.z)) * math.cos(math.rad(rot.x)),
+        -math.cos(math.rad(rot.z)) * math.cos(math.rad(rot.x)),
+        math.sin(math.rad(rot.x))
+    )
+    local camPos = pos - forward * distancia
+
+    local cam = CreateCam("DEFAULT_SCRIPTED_CAMERA", true)
+    SetCamCoord(cam, camPos.x, camPos.y, camPos.z)
+    PointCamAtCoord(cam, pos.x, pos.y, pos.z)
+    SetCamFov(cam, fov or 60.0)
+    SetCamActive(cam, true)
+    RenderScriptCams(true, false, 0, true, true)
+    return cam
+end
+
+function DUI.ClearCamera(cam)
+    if cam then
+        SetCamActive(cam, false)
+        DestroyCam(cam, false)
+        RenderScriptCams(false, false, 0, true, true)
+    end
+end
 
 return DUI
