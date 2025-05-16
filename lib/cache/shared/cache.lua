@@ -22,6 +22,11 @@ local Wait = Wait
 local GetGameTimer = GetGameTimer
 
 local resourceCallbacks = {} -- Add callbacks from resources
+local resourceTracker = {
+    caches = {},
+    callbacks = {},
+    initialized = {}
+}
 
 Cache.Caches = Cache.Caches or {}
 Cache.LoopRunning = Cache.LoopRunning or false
@@ -99,6 +104,53 @@ local function StartLoop()
     end)
 end
 
+local function trackResource(resourceName, type, data)
+    if not resourceName then return end
+
+    -- Initialize resource tracking if needed
+    if not resourceTracker.initialized[resourceName] then
+        resourceTracker.initialized[resourceName] = true
+        resourceTracker.caches[resourceName] = resourceTracker.caches[resourceName] or {}
+        resourceTracker.callbacks[resourceName] = resourceTracker.callbacks[resourceName] or {}
+
+        AddEventHandler('onResourceStop', function(stoppingResource)
+            if stoppingResource ~= resourceName then return end
+
+            -- Clean up caches
+            for _, cacheName in ipairs(resourceTracker.caches[resourceName] or {}) do
+                if Cache.Caches[cacheName] then
+                    Cache.Caches[cacheName] = nil
+                    debugPrint(("Removed cache '%s' - resource '%s' stopped"):format(cacheName, resourceName))
+                end
+            end
+
+            -- Clean up callbacks
+            for _, cb in ipairs(resourceTracker.callbacks[resourceName] or {}) do
+                local targetCache = Cache.Caches[cb.cacheName]
+                if targetCache then
+                    table.remove(targetCache.OnChange, cb.index)
+                    debugPrint(("Removed OnChange callback from cache '%s' - resource '%s' stopped"):format(
+                        cb.cacheName,
+                        resourceName
+                    ))
+                end
+            end
+
+            -- Clear tracking data
+            resourceTracker.caches[resourceName] = nil
+            resourceTracker.callbacks[resourceName] = nil
+            resourceTracker.initialized[resourceName] = nil
+        end)
+    end
+
+    -- Track the new item
+    if type == "cache" then
+        table.insert(resourceTracker.caches[resourceName], data)
+    elseif type == "callback" then
+        table.insert(resourceTracker.callbacks[resourceName], data)
+    end
+end
+
 ---@param name string
 ---@param compare fun():any
 ---@param waitTime integer | nil
@@ -129,6 +181,10 @@ function Cache.Create(name, compare, waitTime)
         OnChange = {},
         Value = result
     }
+
+    -- Track the cache with its resource
+    trackResource(GetInvokingResource(), "cache", _name)
+
     Cache.Caches[_name] = newCache
 
     debugPrint(_name .. " created with initial value: " .. tostring(result))
@@ -162,42 +218,15 @@ function Cache.OnChange(name, onChange)
     -- Figure out which resource is trying to register this callback
     local invokingResource = GetInvokingResource()
     if not invokingResource then return end
-
-    -- Make sure we have a place to store callbacks for this resource
-    resourceCallbacks[invokingResource] = resourceCallbacks[invokingResource] or {}
-
     -- Add the new callback to our list
     local callbackIndex = #cache.OnChange + 1
     cache.OnChange[callbackIndex] = onChange
 
-    -- Keep track of this callback so we can clean it up later
-    table.insert(resourceCallbacks[invokingResource], {
+    -- Track the callback with its resource
+    trackResource(GetInvokingResource(), "callback", {
         cacheName = _name,
         index = callbackIndex
     })
-
-    -- Watch for when the resource stops and clean up its callbacks
-    AddEventHandler('onResourceStop', function(resourceName)
-        if resourceName == invokingResource then
-            -- Clean up any callbacks this resource registered
-            local callbacks = resourceCallbacks[resourceName]
-            if callbacks then
-                for _, cb in ipairs(callbacks) do
-                    local targetCache = Cache.Caches[cb.cacheName]
-                    if targetCache then
-                        -- Remove the callback from our list
-                        table.remove(targetCache.OnChange, cb.index)
-                        debugPrint(("Removed OnChange callback from cache '%s' - resource '%s' stopped"):format(
-                            cb.cacheName,
-                            resourceName
-                        ))
-                    end
-                end
-                -- Clear out all callbacks for this resource
-                resourceCallbacks[resourceName] = nil
-            end
-        end
-    end)
 
     debugPrint(("Added new OnChange callback to cache '%s' from resource '%s'"):format(_name, invokingResource))
 end
