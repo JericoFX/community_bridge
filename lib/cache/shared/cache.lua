@@ -21,6 +21,8 @@ local CreateThread = CreateThread
 local Wait = Wait
 local GetGameTimer = GetGameTimer
 
+local resourceCallbacks = {} -- Add callbacks from resources
+
 Cache.Caches = Cache.Caches or {}
 Cache.LoopRunning = Cache.LoopRunning or false
 
@@ -49,8 +51,11 @@ local function processCacheEntry(now, cache)
         local oldValue = cache.Value
         cache.Value = cache.Compare()
         if cache.Value ~= oldValue and cache.OnChange then
-            for _, onChange in pairs(cache.OnChange) do
-                onChange(cache.Value, oldValue)
+            for i, onChange in ipairs(cache.OnChange) do
+                Citizen.CreateThreadNow(function()
+                    Wait(0)
+                    onChange(cache.Value, oldValue)
+                end)
             end
         end
         cache.LastChecked = now
@@ -125,9 +130,10 @@ function Cache.Create(name, compare, waitTime)
         Value = result
     }
     Cache.Caches[_name] = newCache
+
     debugPrint(_name .. " created with initial value: " .. tostring(result))
     for _, onChange in pairs(newCache.OnChange) do
-        onChange(newCache.Value, nil)
+        onChange(newCache.Value, 0)
     end
     StartLoop()
     return newCache
@@ -147,21 +153,53 @@ end
 --- you can call the value again to delete the callback.
 ---@param name string
 ---@param onChange fun(new:any, old:any)
----@return function unsubscribe
 function Cache.OnChange(name, onChange)
     assert(name, "Cache name is required.")
     local _name = tostring(name)
     local cache = Cache.Caches[_name]
     assert(cache, "Cache with name '" .. _name .. "' does not exist.")
-    table.insert(cache.OnChange, onChange)
-    return function()
-        for i, cb in ipairs(cache.OnChange) do
-            if cb == onChange then
-                table.remove(cache.OnChange, i)
-                break
+
+    -- Figure out which resource is trying to register this callback
+    local invokingResource = GetInvokingResource()
+    if not invokingResource then return end
+
+    -- Make sure we have a place to store callbacks for this resource
+    resourceCallbacks[invokingResource] = resourceCallbacks[invokingResource] or {}
+
+    -- Add the new callback to our list
+    local callbackIndex = #cache.OnChange + 1
+    cache.OnChange[callbackIndex] = onChange
+
+    -- Keep track of this callback so we can clean it up later
+    table.insert(resourceCallbacks[invokingResource], {
+        cacheName = _name,
+        index = callbackIndex
+    })
+
+    -- Watch for when the resource stops and clean up its callbacks
+    AddEventHandler('onResourceStop', function(resourceName)
+        if resourceName == invokingResource then
+            -- Clean up any callbacks this resource registered
+            local callbacks = resourceCallbacks[resourceName]
+            if callbacks then
+                for _, cb in ipairs(callbacks) do
+                    local targetCache = Cache.Caches[cb.cacheName]
+                    if targetCache then
+                        -- Remove the callback from our list
+                        table.remove(targetCache.OnChange, cb.index)
+                        debugPrint(("Removed OnChange callback from cache '%s' - resource '%s' stopped"):format(
+                            cb.cacheName,
+                            resourceName
+                        ))
+                    end
+                end
+                -- Clear out all callbacks for this resource
+                resourceCallbacks[resourceName] = nil
             end
         end
-    end
+    end)
+
+    debugPrint(("Added new OnChange callback to cache '%s' from resource '%s'"):format(_name, invokingResource))
 end
 
 ---@param name string
@@ -194,29 +232,4 @@ function Cache.Update(name, newValue)
     end
 end
 
-setmetatable(Cache, {
-    __index = function(self, key)
-        local cache = self.Caches[key]
-        if cache then
-            return cache.Value
-        else
-            return rawget(self, key)
-        end
-    end,
-    __call = function(self, name, compare, waitTime)
-        if compare == nil then
-            -- only name thats mean you only want to get the value
-            return self.Get(self, name)
-        else
-            -- if compare is not nil then create cache
-            return self.Create(self, name, compare, waitTime)
-        end
-    end,
-})
-
---[[ -- Create new cache:
-Cache("mycache", function() return math.random(1, 100) end, 1000)
-
--- get a value:
-local value = Cache("mycache") ]]
 return Cache

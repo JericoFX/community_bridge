@@ -21,7 +21,7 @@ end
 function GetVehicle()
     local ped = Cache.Get("Ped") -- Use cached ped for efficiency
     if not ped then return end   -- Or handle error/default case
-    return GetVehiclePedIsIn(ped, false)
+    return IsPedInAnyVehicle(ped, false) and GetVehiclePedIsIn(ped, false) or 0
 end
 
 --- Get the seat of the player in the vehicle if the vehicle is occupied
@@ -53,7 +53,6 @@ function GetWeapon()
     if not ped then return end -- Return unarmed hash if no ped
     return GetSelectedPedWeapon(ped)
 end
-
 
 Cache.Create("Ped", GetPed, nil)           -- Check ped only once as param is nil
 Cache.Create("Vehicle", GetVehicle, 500)   -- Check vehicle every 500ms
