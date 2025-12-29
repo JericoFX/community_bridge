@@ -3,13 +3,11 @@ if GetResourceState('esx_property') == 'missing' then return end
 Housing = Housing or {}
 
 RegisterNetEvent('esx_property:enter', function(insideId)
-    local src = source
-    TriggerEvent('community_bridge:Server:_OnPlayerInside', src, insideId)
+    TriggerEvent('community_bridge:Server:_OnPlayerInside', insideId)
 end)
 
 RegisterNetEvent('esx_property:leave', function(insideId)
-    local src = source
-    TriggerEvent('community_bridge:Server:_OnPlayerInside', src, insideId)
+    TriggerEvent('community_bridge:Server:_OnPlayerInside', insideId)
 end)
 
 ---This will get the name of the in use resource.

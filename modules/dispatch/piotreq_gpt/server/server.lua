@@ -1,5 +1,7 @@
 if GetResourceState('piotreq_gpt') == 'missing' then return end
 Dispatch = Dispatch or {}
+local dispatchCooldowns = {}
+local DISPATCH_COOLDOWN_MS = 5000
 
 Dispatch.SendAlert = function(src, alertData)
     -- No clue if this works, but itd be nice to have someone test it.
@@ -33,6 +35,12 @@ end
 
 RegisterNetEvent('community_bridge:Server:piotreq_gpt', function(data)
     local src = source
+    if not src or not data or type(data) ~= "table" then return end
+    local now = GetGameTimer()
+    if dispatchCooldowns[src] and now - dispatchCooldowns[src] < DISPATCH_COOLDOWN_MS then return end
+    dispatchCooldowns[src] = now
+    if data.message and tostring(data.message):len() > 500 then return end
+    -- TODO: Validate sender authorization once job/group info is available in the payload.
     Dispatch.SendAlert(src, data)
 end)
 

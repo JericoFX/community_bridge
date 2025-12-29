@@ -33,6 +33,7 @@ end
 local function triggerCallback(eventName, target, name, args, callback)
     local callbackId = generateCallbackId(name)
     local promise = promise.new()
+    local targets = nil
 
     CallbackRegistry[callbackId] = {
         callback = callback,
@@ -40,12 +41,20 @@ local function triggerCallback(eventName, target, name, args, callback)
     }
 
     if type(target) == 'table' then
+        targets = {}
         for _, id in ipairs(target) do
+            targets[tonumber(id)] = true
             TriggerClientEvent(eventName, tonumber(id), name, callbackId, table.unpack(args))
         end
     else
+        if target ~= -1 then
+            targets = {
+                [tonumber(target)] = true
+            }
+        end
         TriggerClientEvent(eventName, tonumber(target), name, callbackId, table.unpack(args))
     end
+    CallbackRegistry[callbackId].targets = targets
 
     if not callback then
         local result = Citizen.Await(promise)
@@ -80,6 +89,9 @@ if IsDuplicityVersion() then
     end)
 
     RegisterNetEvent(EVENT_NAMES.SERVER_RESPONSE, function(name, callbackId, ...)
+        local data = CallbackRegistry[callbackId]
+        if not data then return end
+        if data.targets and not data.targets[source] then return end
         handleResponse(CallbackRegistry, name, callbackId, ...)
     end)
 

@@ -5,6 +5,36 @@ local registeredShops = {}
 
 local Language = Language or Require("modules/locales/shared.lua")
 local locale = Language.Locale
+local SHOP_INTERACT_DISTANCE = 3.0
+
+local function getCoordsDistance(a, b)
+    if not a or not b then return nil end
+    local coordsA = a
+    if type(a) == "table" and a.x and a.y and a.z then
+        coordsA = vector3(a.x, a.y, a.z)
+    end
+    local coordsB = b
+    if type(b) == "table" and b.x and b.y and b.z then
+        coordsB = vector3(b.x, b.y, b.z)
+    end
+    if type(coordsA) == "vector3" and type(coordsB) == "vector3" then
+        return #(coordsA - coordsB)
+    end
+    return nil
+end
+
+local function isPlayerInShopGroups(src, groups)
+    if not groups then return true end
+    if type(groups) ~= "table" then return false end
+    local jobData = Framework.GetPlayerJobData(src)
+    local jobName = jobData and jobData.jobName
+    if not jobName then return false end
+    if groups[jobName] then return true end
+    for _, group in pairs(groups) do
+        if group == jobName then return true end
+    end
+    return false
+end
 
 ---This can open a shop for the client
 ---@param src number
@@ -42,6 +72,12 @@ Shops.CompleteCheckout = function(src, shopName, item, amount, account)
 
     local shopData = registeredShops[shopName]
     if not shopData then return end
+    if shopData.groups and not isPlayerInShopGroups(src, shopData.groups) then return end
+    if shopData.shopCoords then
+        local playerCoords = GetEntityCoords(GetPlayerPed(src))
+        local distance = getCoordsDistance(playerCoords, shopData.shopCoords)
+        if distance and distance > SHOP_INTERACT_DISTANCE then return end
+    end
 
     local itemData = nil
     for _, data in pairs(shopData.inventory) do
@@ -51,7 +87,10 @@ Shops.CompleteCheckout = function(src, shopName, item, amount, account)
         end
     end
     if not itemData or not itemData.price then return print("community_bridge Player ID "..src.." attempted to purchase invalid item from shop: "..shopName) end
-    if itemData.count and itemData.count <= 0 then return Notify.SendNotify(src, locale('Shops.NotEnoughStock'), "error", 5000) end
+    if itemData.count then
+        if itemData.count <= 0 then return Notify.SendNotify(src, locale('Shops.NotEnoughStock'), "error", 5000) end
+        if amount > itemData.count then return Notify.SendNotify(src, locale('Shops.NotEnoughStock'), "error", 5000) end
+    end
     local totalCost = tonumber(itemData.price) * amount
     local balance = Framework.GetAccountBalance(src, account)
     if not balance then return end
@@ -64,6 +103,9 @@ Shops.CompleteCheckout = function(src, shopName, item, amount, account)
     if not success then
         Framework.AddAccountBalance(src, account, totalCost)
         return Notify.SendNotify(src, locale('Shops.PurchaseFailed'), "error", 5000)
+    end
+    if itemData.count then
+        itemData.count = itemData.count - amount
     end
 
     local itemLabel = Inventory.GetItemInfo(itemData.name).label or itemData.name
