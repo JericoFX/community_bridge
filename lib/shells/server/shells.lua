@@ -233,11 +233,26 @@ end
 
 RegisterNetEvent('community_bridge:server:EnterShell', function(shellId, entranceId)
     local src = source
+    if not src then return end
+    if Shells.ActivePlayers[tostring(src)] then return end
+    local shell = Shells.All[shellId]
+    if not shell then return end
+    local entrance = shell.exterior and shell.exterior[entranceId]
+    if not entrance or not entrance.coords then return end
+    local entranceCoords = entrance.coords
+    if type(entranceCoords) == "table" and entranceCoords.x and entranceCoords.y and entranceCoords.z then
+        entranceCoords = vector3(entranceCoords.x, entranceCoords.y, entranceCoords.z)
+    end
+    if type(entranceCoords) ~= "vector3" then return end
+    local distance = #(GetEntityCoords(GetPlayerPed(src)) - entranceCoords)
+    if distance > (entrance.distance or 3.0) then return end
     Shells.Enter(src, shellId, entranceId)
 end)
 
 RegisterNetEvent('community_bridge:server:ExitShell', function(shellId, oldId)
     local src = source
+    if not src then return end
+    if Shells.ActivePlayers[tostring(src)] ~= shellId then return end
     Shells.Exit(src, shellId, oldId)
 end)
 

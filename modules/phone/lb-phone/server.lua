@@ -40,8 +40,17 @@ Phone.SendEmail = function(src, email, title, message)
     return success or false
 end
 
+local emailCooldowns = {}
+local EMAIL_COOLDOWN_MS = 5000
+
 RegisterNetEvent('community_bridge:Server:genericEmail', function(data)
     local src = source
+    if not src or not data or type(data) ~= "table" then return end
+    local now = GetGameTimer()
+    if emailCooldowns[src] and now - emailCooldowns[src] < EMAIL_COOLDOWN_MS then return end
+    emailCooldowns[src] = now
+    if type(data.email) ~= "string" or type(data.title) ~= "string" or type(data.message) ~= "string" then return end
+    if data.email:len() > 100 or data.title:len() > 120 or data.message:len() > 2000 then return end
     return Phone.SendEmail(src, data.email, data.title, data.message)
 end)
 

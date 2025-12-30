@@ -3,13 +3,11 @@ if GetResourceState('ps-housing') == 'missing' then return end
 Housing = Housing or {}
 
 RegisterNetEvent('ps-housing:server:enterProperty', function(insideId)
-    local src = source
-    TriggerEvent('community_bridge:Server:_OnPlayerInside', src, insideId)
+    TriggerEvent('community_bridge:Server:_OnPlayerInside', insideId)
 end)
 
 RegisterNetEvent('ps-housing:server:leaveProperty', function(insideId)
-    local src = source
-    TriggerEvent('community_bridge:Server:_OnPlayerInside', src, insideId)
+    TriggerEvent('community_bridge:Server:_OnPlayerInside', insideId)
 end)
 
 ---This will get the name of the in use resource.
